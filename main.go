@@ -30,6 +30,7 @@ type Rank struct {
 	ProfileImage string              `json:"profile_image"`
 	ImageURLs    []string            `json:"image_urls"`
 	Videos       []twitter.VideoInfo `json:"videos"`
+	URLs         []string            `json:"urls"`
 }
 type ResponseType struct {
 	Type string `json:"type"`
@@ -40,33 +41,54 @@ type URLResponse struct {
 }
 type RankingResponse struct {
 	ResponseType
-	Ranking     []Rank `json:"ranking"`
-	LongRanking []Rank `json:"longRanking"`
+	Ranking        []Rank `json:"ranking"`
+	LongRanking    []Rank `json:"longRanking"`
+	UrlRanking     []Rank `json:"urlRanking"`
+	UrlLongRanking []Rank `json:"urlLongRanking"`
 }
 type HourlyRankingResponse struct {
-	Ranking []Rank               `json:"ranking"`
-	Trends  []twitter.TrendsList `json:"trends"`
+	Ranking    []Rank               `json:"ranking"`
+	UrlRanking []Rank               `json:"urlRanking"`
+	Trends     []twitter.TrendsList `json:"trends"`
 }
 
 var imagesCount map[string]int     // Count in 2H
 var imagesLongCount map[string]int // Count in 24H
 
+var urlsCount map[string]int     // Count in 2H
+var urlsLongCount map[string]int // Count in 24H
+
 var imagesRank map[string]Rank
 var mux sync.Mutex
 
-func pushImage(image string) {
-	_, ok := imagesCount[image]
+func pushTwit(twit string) {
+	_, ok := imagesCount[twit]
 	if ok {
-		imagesCount[image]++
+		imagesCount[twit]++
 	} else {
-		imagesCount[image] = 1
+		imagesCount[twit] = 1
 	}
 
-	_, ok = imagesLongCount[image]
+	_, ok = imagesLongCount[twit]
 	if ok {
-		imagesLongCount[image]++
+		imagesLongCount[twit]++
 	} else {
-		imagesLongCount[image] = 1
+		imagesLongCount[twit] = 1
+	}
+}
+func pushURL(twit string) {
+	_, ok := urlsCount[twit]
+	if ok {
+		urlsCount[twit]++
+	} else {
+		urlsCount[twit] = 1
+	}
+
+	_, ok = urlsLongCount[twit]
+	if ok {
+		urlsLongCount[twit]++
+	} else {
+		urlsLongCount[twit] = 1
 	}
 }
 func checkTime(t time.Time, limit int) bool {
@@ -78,11 +100,12 @@ func checkTime(t time.Time, limit int) bool {
 	return false
 }
 func refreshRanking() {
+	// ============
 	var nextImagesCount map[string]int
 	nextImagesCount = make(map[string]int)
 	for k, v := range imagesCount {
 		r := imagesRank[k]
-		if checkTime(r.CreateAt, 1) && r.Retweet > 2 {
+		if checkTime(r.CreateAt, 1) && r.Retweet > 5 {
 			nextImagesCount[k] = v
 		}
 	}
@@ -91,11 +114,32 @@ func refreshRanking() {
 	nextImagesCount = make(map[string]int)
 	for k, v := range imagesLongCount {
 		r := imagesRank[k]
-		if checkTime(r.CreateAt, 24) && r.Retweet > 2 {
+		if checkTime(r.CreateAt, 24) && r.Retweet > 5 {
 			nextImagesCount[k] = v
 		}
 	}
 	imagesLongCount = nextImagesCount
+
+	// ============
+	var nextUrlsCount map[string]int
+	nextUrlsCount = make(map[string]int)
+	for k, v := range urlsCount {
+		r := imagesRank[k]
+		if checkTime(r.CreateAt, 1) && r.Retweet > 5 {
+			nextUrlsCount[k] = v
+		}
+	}
+	urlsCount = nextUrlsCount
+
+	nextUrlsCount = make(map[string]int)
+	for k, v := range urlsLongCount {
+		r := imagesRank[k]
+		if checkTime(r.CreateAt, 24) && r.Retweet > 5 {
+			nextUrlsCount[k] = v
+		}
+	}
+	urlsLongCount = nextUrlsCount
+	// ============
 
 	var nextImagesRank map[string]Rank
 	nextImagesRank = make(map[string]Rank)
@@ -105,9 +149,16 @@ func refreshRanking() {
 	for k, _ := range imagesLongCount {
 		nextImagesRank[k] = imagesRank[k]
 	}
+	for k, _ := range urlsCount {
+		nextImagesRank[k] = imagesRank[k]
+	}
+	for k, _ := range urlsLongCount {
+		nextImagesRank[k] = imagesRank[k]
+	}
 	imagesRank = nextImagesRank
 
-	fmt.Printf("imagesRank count %d, imagesCount %d, imagesLongCount %d\n", len(imagesRank), len(imagesCount), len(imagesLongCount))
+	fmt.Printf("imagesRank count:%d, imagesCount:%d, imagesLongCount:%d, urlsCount:%d, urlsLongCount:%d\n",
+		len(imagesRank), len(imagesCount), len(imagesLongCount), len(urlsCount), len(urlsLongCount))
 }
 
 func makeRanking(countAssoc *map[string]int) []Rank {
@@ -125,9 +176,9 @@ func makeRanking(countAssoc *map[string]int) []Rank {
 		return ss[i].Value > ss[j].Value
 	})
 	for index, kv := range ss {
-		fmt.Printf("get imagesRank %s %v\n", kv.Key, imagesRank[kv.Key])
+		//fmt.Printf("get imagesRank %s %v\n", kv.Key, imagesRank[kv.Key])
 		ranking = append(ranking, imagesRank[kv.Key])
-		if index > 100 {
+		if index > 200 {
 			break
 		}
 	}
@@ -146,6 +197,16 @@ func makeLongRanking() []Rank {
 	defer func() { mux.Unlock() }()
 	return makeRanking(&imagesLongCount)
 }
+func makeUrlRegularRanking() []Rank {
+	mux.Lock()
+	defer func() { mux.Unlock() }()
+	return makeRanking(&urlsCount)
+}
+func makeUrlLongRanking() []Rank {
+	mux.Lock()
+	defer func() { mux.Unlock() }()
+	return makeRanking(&urlsLongCount)
+}
 
 func initTwitter(client *twitter.Client, m *melody.Melody, stopCh, doneCh chan struct{}) {
 
@@ -158,12 +219,10 @@ func initTwitter(client *twitter.Client, m *melody.Melody, stopCh, doneCh chan s
 		// todo: filter japanese
 		// todo: extract url
 		ext := tweet.ExtendedEntities
-		if ext == nil {
-			fmt.Println("Not extended entities")
-			return
+		var media []twitter.MediaEntity
+		if ext != nil {
+			media = ext.Media //tweet.Entities.Media
 		}
-		media := ext.Media //tweet.Entities.Media
-
 		retweetedStatus := tweet.RetweetedStatus
 		retweet := 0
 		createAt, err := time.Parse("Mon Jan 2 15:04:05 -0700 2006", tweet.CreatedAt)
@@ -183,74 +242,204 @@ func initTwitter(client *twitter.Client, m *melody.Melody, stopCh, doneCh chan s
 					break
 				}
 			}
-			if len(media) > 0 && isJp {
-				fmt.Println("Media: " + media[0].MediaURL)
-				mux.Lock()
-				pushImage(media[0].MediaURL)
-				var images []string
-				var videos []twitter.VideoInfo
-				for _, v := range media {
-					images = append(images, v.MediaURL)
-					videos = append(videos, v.VideoInfo)
+			if isJp {
+				//fmt.Println("Media: " + tweet.IDStr)
+				isUseTwit := false
+				if len(media) > 0 {
+					isUseTwit = true
 				}
-
-				r := Rank{URL: media[0].MediaURL,
-					Count:        imagesCount[media[0].MediaURL],
-					LongCount:    imagesLongCount[media[0].MediaURL],
-					Retweet:      retweet,
-					Twit:         "https://twitter.com/" + tweet.User.ScreenName + "/status/" + tweet.IDStr,
-					CreateAt:     createAt,
-					ProfileImage: tweet.User.ProfileImageURL,
-					ImageURLs:    images,
-					Videos:       videos,
+				if len(tweet.Entities.Urls) > 0 {
+					isUseTwit = true
 				}
-				imagesRank[media[0].MediaURL] = r
-				refreshRanking()
-				mux.Unlock()
+				if isUseTwit {
+					mux.Lock()
+					/*
+					  TODO: url
+					  url only => url
+					  media only => first media url?
+					*/
+					pushTwit(tweet.IDStr)
+					var images []string
+					var videos []twitter.VideoInfo
+					var urls []string
+					for _, v := range media {
+						images = append(images, v.MediaURL)
+						videos = append(videos, v.VideoInfo)
+					}
 
-				ur := URLResponse{ResponseType: ResponseType{Type: "url"}, Rank: r}
-				j, _ := json.Marshal(ur)
-				m.Broadcast([]byte(j))
-			} else {
-				fmt.Println("Not include media")
+					if len(tweet.Entities.Urls) > 0 {
+						for _, r := range tweet.Entities.Urls {
+							urls = append(urls, r.ExpandedURL)
+						}
+					}
+					mediaURL := ""
+					if len(media) > 0 {
+						mediaURL = media[0].MediaURL
+					}
+					r := Rank{URL: mediaURL,
+						Count:        imagesCount[tweet.IDStr],
+						LongCount:    imagesLongCount[tweet.IDStr],
+						Retweet:      retweet,
+						Twit:         "https://twitter.com/" + tweet.User.ScreenName + "/status/" + tweet.IDStr,
+						CreateAt:     createAt,
+						ProfileImage: tweet.User.ProfileImageURL,
+						ImageURLs:    images,
+						Videos:       videos,
+						URLs:         urls,
+					}
+					imagesRank[tweet.IDStr] = r
+					refreshRanking()
+					mux.Unlock()
+
+					ur := URLResponse{ResponseType: ResponseType{Type: "url"}, Rank: r}
+					j, _ := json.Marshal(ur)
+					m.Broadcast([]byte(j))
+				}
 			}
+
 		}
 		// todo: expand url
-
 	}
 	fmt.Println("Starting Stream...")
 
-	// FILTER
-	/*
-		filterParams := &twitter.StreamFilterParams{
-			Track:         []string{"http,。,、,,あ,い,う,え,お,か,き,く,け,こ,さ,し,す,せ,そ,た,ち,つ,て,と,な,に,ぬ,ね,の,は,ひ,ふ,へ,ほ,ま,み,む,め,も,や,ゆ,よ,ら,り,る,れ,ろ,わ,を,ん"}, // keyword
-			//Track:         []string{"RT"},
-			StallWarnings: twitter.Bool(true),
-			Language:      []string{"ja"},
-		}
-		stream, err := client.Streams.Filter(filterParams)
-		if err != nil {
-			log.Fatal(err)
-		}
-	*/
-
+	// == sample stream ==
 	for {
 		params := &twitter.StreamSampleParams{
 			StallWarnings: twitter.Bool(true),
 		}
-		stream, err := client.Streams.Sample(params)
+		streamSample, err := client.Streams.Sample(params)
 		if err != nil {
 			log.Fatal(err)
 		}
 
 		// Receive messages until stopped or stream quits
-		demux.HandleChan(stream.Messages)
+		demux.HandleChan(streamSample.Messages)
 		fmt.Println("retry")
 		time.Sleep(10 * time.Second)
 
 		select {
 		case <-stopCh:
-			stream.Stop()
+			streamSample.Stop()
+			return
+		default:
+		}
+	}
+
+}
+
+func initTwitterFilter(client *twitter.Client, m *melody.Melody, stopCh, doneCh chan struct{}) {
+
+	defer func() { close(doneCh) }()
+
+	// Convenience Demux demultiplexed stream messages
+	demux := twitter.NewSwitchDemux()
+	demux.Tweet = func(tweet *twitter.Tweet) {
+		//fmt.Println(tweet.Text) // raw
+		// todo: filter japanese
+		// todo: extract url
+		ext := tweet.ExtendedEntities
+		var media []twitter.MediaEntity
+		if ext != nil {
+			media = ext.Media //tweet.Entities.Media
+		}
+		retweetedStatus := tweet.RetweetedStatus
+		retweet := 0
+		createAt, err := time.Parse("Mon Jan 2 15:04:05 -0700 2006", tweet.CreatedAt)
+		if err != nil {
+			fmt.Println("Error: time format %v", err)
+		}
+		if retweetedStatus != nil {
+			retweet = retweetedStatus.RetweetCount
+			createAt, _ = time.Parse("Mon Jan 2 15:04:05 -0700 2006", tweet.RetweetedStatus.CreatedAt)
+			tweet = retweetedStatus
+		}
+		if checkTime(createAt, 24) {
+			isJp := false
+			for _, r := range tweet.Text {
+				if unicode.In(r, unicode.Hiragana) || unicode.In(r, unicode.Katakana) {
+					isJp = true
+					break
+				}
+			}
+			if isJp {
+				//fmt.Println("Media: " + tweet.IDStr)
+				isUseTwit := false
+				if len(media) > 0 {
+					isUseTwit = true
+				}
+				if len(tweet.Entities.Urls) > 0 {
+					isUseTwit = true
+				}
+				if isUseTwit {
+					mux.Lock()
+					/*
+					  TODO: url
+					  url only => url
+					  media only => first media url?
+					*/
+					pushURL(tweet.IDStr)
+					var images []string
+					var videos []twitter.VideoInfo
+					var urls []string
+					for _, v := range media {
+						images = append(images, v.MediaURL)
+						videos = append(videos, v.VideoInfo)
+					}
+
+					if len(tweet.Entities.Urls) > 0 {
+						for _, r := range tweet.Entities.Urls {
+							urls = append(urls, r.ExpandedURL)
+						}
+					}
+					mediaURL := ""
+					if len(media) > 0 {
+						mediaURL = media[0].MediaURL
+					}
+					r := Rank{URL: mediaURL,
+						Count:        imagesCount[tweet.IDStr],
+						LongCount:    imagesLongCount[tweet.IDStr],
+						Retweet:      retweet,
+						Twit:         "https://twitter.com/" + tweet.User.ScreenName + "/status/" + tweet.IDStr,
+						CreateAt:     createAt,
+						ProfileImage: tweet.User.ProfileImageURL,
+						ImageURLs:    images,
+						Videos:       videos,
+						URLs:         urls,
+					}
+					imagesRank[tweet.IDStr] = r
+					refreshRanking()
+					mux.Unlock()
+
+					ur := URLResponse{ResponseType: ResponseType{Type: "url"}, Rank: r}
+					j, _ := json.Marshal(ur)
+					m.Broadcast([]byte(j))
+				}
+			}
+
+		}
+		// todo: expand url
+	}
+	fmt.Println("Starting Stream...")
+
+	// FILTER
+	for {
+		filterParams := &twitter.StreamFilterParams{
+			Track:         []string{"http"}, // keyword
+			StallWarnings: twitter.Bool(true),
+			Language:      []string{"ja"},
+		}
+		streamFilter, err := client.Streams.Filter(filterParams)
+		if err != nil {
+			log.Fatal(err)
+		}
+		// Receive messages until stopped or stream quits
+		demux.HandleChan(streamFilter.Messages)
+		fmt.Println("retry")
+		time.Sleep(10 * time.Second)
+
+		select {
+		case <-stopCh:
+			streamFilter.Stop()
 			return
 		default:
 		}
@@ -272,6 +461,9 @@ func main() {
 	imagesLongCount = make(map[string]int)
 	imagesRank = make(map[string]Rank)
 
+	urlsCount = make(map[string]int)
+	urlsLongCount = make(map[string]int)
+
 	r := gin.Default()
 	m := melody.New()
 
@@ -284,6 +476,7 @@ func main() {
 	doneCh := make(chan struct{})
 	client := twitter.NewClient(httpClient)
 	go initTwitter(client, m, stopCh, doneCh)
+	//go initTwitterFilter(client, m, stopCh, doneCh)
 
 	r.GET("/trend", func(c *gin.Context) {
 		trends, _, err := client.Trends.Place(23424856, nil)
@@ -299,8 +492,9 @@ func main() {
 		}
 
 		c.JSON(http.StatusOK, &HourlyRankingResponse{
-			Ranking: makeRegularRanking(),
-			Trends:  trends,
+			Ranking:    makeRegularRanking(),
+			UrlRanking: makeUrlRegularRanking(),
+			Trends:     trends,
 		})
 	})
 	r.GET("/longRanking", func(c *gin.Context) {
@@ -310,8 +504,9 @@ func main() {
 		}
 
 		c.JSON(http.StatusOK, &HourlyRankingResponse{
-			Ranking: makeLongRanking(),
-			Trends:  trends,
+			Ranking:    makeLongRanking(),
+			UrlRanking: makeUrlLongRanking(),
+			Trends:     trends,
 		})
 	})
 	r.GET("/ws", func(c *gin.Context) {
@@ -319,9 +514,11 @@ func main() {
 	})
 	m.HandleMessage(func(s *melody.Session, msg []byte) {
 		rr := RankingResponse{
-			ResponseType: ResponseType{Type: "ranking"},
-			Ranking:      makeRegularRanking(),
-			LongRanking:  makeLongRanking(),
+			ResponseType:   ResponseType{Type: "ranking"},
+			Ranking:        makeRegularRanking(),
+			LongRanking:    makeLongRanking(),
+			UrlRanking:     makeUrlRegularRanking(),
+			UrlLongRanking: makeUrlLongRanking(),
 		}
 		j, _ := json.Marshal(rr)
 		s.Write([]byte(j))
